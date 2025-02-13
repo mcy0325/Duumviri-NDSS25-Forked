@@ -40,7 +40,7 @@ from xml.sax import default_parser_list
 from wsgiref import validate
 from functools import total_ordering
 from collections.abc import Iterable
-from multiprocessing import Pool, Array
+from multiprocessing import Pool, Array, cpu_count
 import pytz
 from seleniumwire.request import Response
 
@@ -307,9 +307,9 @@ class DataCollection():
 			urls=urls[:5000]
 		highest_idx, existing_idxs=find_highest_idx(self.save_path, pattern='*')
 		self.split_data_and_run(urls, existing_idxs, self.generic_collection_routine,
-								num_instances=30, additionals=['random_crawl', 150])
+								num_instances=50, additionals=['random_crawl', 150])
 
-	def split_data_and_run(self, our_dataset, continue_or_fill, to_para_func, num_instances=6, additionals=[]):
+	def split_data_and_run(self, our_dataset, continue_or_fill, to_para_func, num_instances=50, additionals=[]):
 		"""
 		continue_or_fill represents two modes
 				- continue_or_fill is a interger when in continue mode, the algo treats the integer as the starting idx
@@ -345,23 +345,25 @@ class DataCollection():
 				idxs=input_vals.index.tolist()
 		assert (len(input_vals) == len(idxs)), 'input_vals:%d idxs:%d' % (
 			len(input_vals), len(idxs))
-		input_vals=utils.equal_sized_chunks(input_vals, num_instances)
-		idxs=utils.equal_sized_chunks(idxs, num_instances)
-		assert (len(input_vals) == num_instances and len(idxs) == num_instances)
-		for i in range(num_instances):
-			assert (len(input_vals[i]) == len(idxs[i]))
-
+		available_cores = min(cpu_count(), 50)
+    		input_vals = utils.equal_sized_chunks(input_vals, available_cores)
+    		idxs = utils.equal_sized_chunks(idxs, available_cores)
+		
+		assert len(input_vals) == available_cores and len(idxs) == available_cores
+		
 		total=len(our_dataset)
 		additionals.insert(0, total)
 		status_file_path='./git_related/status_files/%s' % to_para_func.__name__
 		additionals.insert(1, status_file_path)
-		ids=list(range(num_instances))
+		ids = list(range(available_cores))
+		additionals = [additionals] * available_cores
 
-		additionals=[additionals] * num_instances
-		if num_instances == 1:
+		print(f"Running: {available_cores} cores using now.")
+		
+		if available_cores == 1:
 			to_para_func(input_vals[0], idxs[0], ids[0], additionals[0])
 		else:
-			with Pool(num_instances) as p:
+			with Pool(available_cores) as p:
 				p.starmap(to_para_func, list(
 					zip(input_vals, idxs, ids, additionals)))
 
@@ -613,6 +615,6 @@ class DataCollection():
  
 if __name__ == '__main__':
 	if sys.argv[1] == '1':
-		DataCollection().collect_random_crawl('./pagedelta/', [sys.argv[2]])
+		DataCollection().collect_random_crawl('./pagedelta/', [sys.argv[2]] if len(sys.argv) > 2 else [])
 	elif sys.argv[1] == '2':
 		DataCollection().collect_parameter_one(sys.argv[2])
